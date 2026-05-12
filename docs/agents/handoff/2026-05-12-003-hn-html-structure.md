@@ -401,7 +401,42 @@ even 1000+ comments render in one document.
 
 ## Concrete reference comments
 
-From the task prompt; useful for testing the parser:
+The task prompt (`docs/agents/prompt.txt`) names four comments, one
+per status combination, to use as a parseable smoke-test set.  Each
+appears two ways: a **permalink** (just the comment, no thread
+context) and a **context link** (the full item page with that comment
+highlighted via `#anchor`).  We crawl only the context links --
+that's where the surrounding HTML markers are present.
+
+### `[flagged][dead]`
+
+- comment id `48106273` -- by `Maverick_G`
+- permalink: https://news.ycombinator.com/item?id=48106273
+- context: https://news.ycombinator.com/item?id=48085993#48106273
+  (story id `48085993` = "Ask HN: Who is hiring? (May 2026)")
+
+### `[dead]` only
+
+- comment id `48105810` -- by `touseefbuilds`
+- permalink: https://news.ycombinator.com/item?id=48105810
+- context: https://news.ycombinator.com/item?id=48038191#48105810
+  (story id `48038191`)
+
+### `[flagged][dead][collapsed]`
+
+- comment id `48092598` -- by `rdevilla`
+- permalink: https://news.ycombinator.com/item?id=48092598
+- context: https://news.ycombinator.com/item?id=48086190#48092598
+  (story id `48086190`)
+
+### `[collapsed]` only (live, no flag/death)
+
+- comment id `48085067` -- by `andreashaerter`
+- permalink: https://news.ycombinator.com/item?id=48085067
+- context: https://news.ycombinator.com/item?id=48073201#48085067
+  (story id `48073201`)
+
+### Summary table
 
 | Comment id | Context (item) | Flags |
 |---|---|---|
@@ -410,7 +445,36 @@ From the task prompt; useful for testing the parser:
 | 48092598 | 48086190 | `[flagged][dead][collapsed]` |
 | 48085067 | 48073201 | `[collapsed]` only (live) |
 
-`arc/scrape/verify-flags.arc` re-asserts each of these.
+### Why crawl context, not permalink
+
+Per the prompt: "All of these should be parseable from their context
+links.  I.e. when crawling, you should only crawl the front page and
+the comments of each story.  No need to visit comments directly."
+
+The comment permalink (`/item?id=COMMENT_ID`) shows only that comment
+and its descendants -- you lose the parent thread, the indent depth
+relative to ancestors, and (for `[collapsed]`) the `coll` class is
+not always present on a comment shown as its own root.  The context
+URL (`/item?id=STORY_ID#COMMENT_ID`) renders the comment exactly as
+HN's front-page user would see it, with all status markers in place.
+
+### Verification script
+
+`arc/scrape/verify-flags.arc` re-fetches the four context items at
+the configured crawl-delay, parses each, and asserts the named
+comment has the expected `dead`/`flagged`/`collapsed` triple.  Run
+it with `./sharc arc/scrape/verify-flags.arc` -- a passing run looks
+like:
+
+```
+PASS 48106273 in 48085993 dead=T flagged=T collapsed=
+PASS 48105810 in 48038191 dead=T flagged= collapsed=
+PASS 48092598 in 48086190 dead=T flagged=T collapsed=T
+PASS 48085067 in 48073201 dead= flagged= collapsed=T
+```
+
+If HN's markup ever shifts (new tag, attribute renamed, etc.) this
+is the first thing to regress.
 
 ## Related code
 
