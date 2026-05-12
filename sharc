@@ -1,3 +1,3 @@
 #!/bin/sh
 DIR="$(cd "$(dirname "$0")" && pwd)"
-exec sbcl --dynamic-space-size "${SHARC_HEAP_MB:-32768}" --script "$DIR/boot.lisp" "$@"
+exec sbcl --dynamic-space-size "${SHARC_HEAP_MB:-2048}" --script "$DIR/boot.lisp" "$@"
