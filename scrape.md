@@ -195,8 +195,8 @@ different host, `hacker-news.firebaseio.com`).
 # Verifying status detection
 
 `scrape-verify-flags.arc` re-fetches the 4 comment examples from
-`docs/agents/handoff/2026-05-12-002-hn-scraper-prompt.txt` and asserts each has the expected flag
-combination.  Useful sanity check if you suspect HN's markup has
+[the original scraper prompt](docs/agents/handoff/2026-05-12-002-hn-scraper-prompt.txt)
+and asserts each has the expected flag combination.  Useful sanity check if you suspect HN's markup has
 shifted:
 
 ```sh
