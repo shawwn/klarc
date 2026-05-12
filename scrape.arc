@@ -650,7 +650,24 @@
     (let stories (rev ranked)
       (= stories* (map [item _!id] stories)
          ranked-stories* (map [item _!id] stories)))
+    ; Persist the ranking so a subsequent (nsv) -> (ensure-topstories)
+    ; reads our order from disk instead of calling gen-topstories (which
+    ; walks down by 1 from maxid*; with HN ids in the tens of millions
+    ; that's catastrophic).
+    (save-topstories)
     (prn "imported " (len ranked) " stories")))
+
+
+; news.arc's gen-topstories walks `(down id maxid* 1)` calling (item
+; id) for every integer from maxid* down to 1.  With imported HN ids
+; maxid* is ~48M, so a cold (nsv) (no topstories file on disk) freezes
+; trying to do 48 million hash lookups + file probes.  Override it
+; with an items*-driven version that touches only the ids we have.
+(def gen-topstories ()
+  (let metas (keep metastory (map item (keys items*)))
+    (= ranked-stories*
+       (or (sort (compare > (memo frontpage-rank)) metas)
+           nil))))
 
 (def import-scraped-story (s)
   (let id s!id
