@@ -689,6 +689,13 @@
       (= it!title (or s!title it!title))
       (= it!url   (or s!url   it!url))
       (= it!by    (or s!by    it!by))
+      ; record the story under the author's submitted list (used by
+      ; /submitted and /threads).
+      (when s!by
+        (whenlet author (profs* s!by)
+          (unless (mem id author!submitted)
+            (= author!submitted (cons id author!submitted))
+            (save-prof s!by))))
       (save-item it)
       it)))
 
@@ -710,6 +717,10 @@
                          'time (or c!time (seconds))
                          'text c!text
                          'parent c!parent
+                         ; HN comments start with 1 point (author's auto-upvote).
+                         ; We don't observe the live score from HTML, so 1 is the
+                         ; right baseline.
+                         'score 1
                          'dead  c!dead
                          'flags (if c!flagged (scrape-flag-list) nil)
                          'deleted c!deleted)))
@@ -729,10 +740,25 @@
         (unless (mem id p!kids)
           (= p!kids (+ p!kids (list id)))
           (save-item p)))
+      ; record this comment under the author's submitted list so
+      ; news's (comments user) -- which walks (uvar user submitted) --
+      ; picks it up for /threads?id=USER.
+      (when c!by
+        (whenlet author (profs* c!by)
+          (unless (mem id author!submitted)
+            (= author!submitted (cons id author!submitted))
+            (save-prof c!by))))
       (save-item it)
       it)))
 
 (def import-scraped-user (u)
+  ; Note: we deliberately do NOT copy u!submitted (the firebase
+  ; user's recent-submissions list) into the profile.  Firebase
+  ; returns up to ~10000 ids, the vast majority of which we never
+  ; scraped, so (item id) -> nil for them.  News's `comments` then
+  ; calls (acomment nil) which is (nil 'type) -> error.  We build
+  ; submitted from below instead, in import-scraped-{story,comment},
+  ; restricting it to items we actually have.
   (let id (string u!id)
     (when (goodname id)
       (let p (or (profs* id)
