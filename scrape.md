@@ -235,6 +235,6 @@ PASS 48085067 in 48073201 dead= flagged= collapsed=T
   *first*, then parses each in isolation.  Without that scoping,
   `posmatch` scans the full 2MB document for every field of every
   comment and parse times explode to minutes.
-- See `docs/agents/handoff/2026-05-12-002-hn-scraper.md` for the full
-  design rationale and Arc-specific gotchas encountered while building
-  this.
+- See [the handoff doc](docs/agents/handoff/2026-05-12-002-hn-scraper.md)
+  for the full design rationale and Arc-specific gotchas encountered
+  while building this.
