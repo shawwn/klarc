@@ -643,9 +643,11 @@
       (= scrape-dev-password* cfg!dev-password)))
   (let ranked nil
     ; users first (so items have authors)
-    (each f (dir scrape-user-dir*)
-      (aif (load-json (+ scrape-user-dir* f))
-           (import-scraped-user it)))
+    (let users (dir scrape-user-dir*)
+      (prn "importing @(len users) users")
+      (noisy-each 100 u users
+        (aif (load-json (+ scrape-user-dir* u))
+             (import-scraped-user it))))
     ; then items, walking front.json (page+rank order from the scrape)
     (let front (or (load-json (+ scrape-dir* "front.json")) nil)
       (each entry front
