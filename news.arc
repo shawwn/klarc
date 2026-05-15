@@ -8,6 +8,7 @@
 ; bug: somehow (+ votedir* nil) is getting evaluated.
 
 (declare 'atstrings t)
+(declare 'explicit-flush t)
 
 (= this-site*    "My Forum"
    site-url*     "http://news.yourdomain.com/"
@@ -1035,25 +1036,56 @@ function vote(node) {
 
 (= votewid* 14)
       
+; Precomputed arrow imgs (out macro evaluates at compile time, so these
+; bake in whatever up-url*/down-url* are when this file loads).
+(= up-arrow-img*
+   (tostring (out (gentag img src up-url*   border 0 vspace 3 hspace 2)))
+   down-arrow-img*
+   (tostring (out (gentag img src down-url* border 0 vspace 3 hspace 2))))
+
 (def votelinks (i whence (o downtoo))
-  (center
-    (if (and (cansee i)
-             (~and (me) ((votes) i!id)))
-         (do (votelink i whence 'up)
-             (if (and downtoo
-                      (or (admin)
-                          (< (item-age i) downvote-time*))
-                      (canvote i 'down))
-                 (do (br)
-                     (votelink i whence 'down))
-                 ; don't understand why needed, but is, or a new
-                 ; page is generated on voting
-                 (tag (span id (+ "down_" i!id)))))
-        (author i)
-         (do (fontcolor orange (pr "*"))
-             (br)
-             (hspace votewid*))
-        (hspace votewid*))))
+  ; Fast path for the overwhelmingly common cases:
+  ;   - logged-out viewer on a visible comment, OR
+  ;   - logged-in viewer who hasn't voted, can't downvote (old item or
+  ;     no karma), and isn't the author
+  ; Skips ~6 macro-emitted pr calls per comment in favour of ~4 inlined ones.
+  (let me-now (me)
+    (if
+      (and (no me-now) (cansee i) (live i))
+        (pr "<center><a id= href=\"vote?for=" i!id "&dir=up&whence="
+            (urlencode whence) "\">"
+            up-arrow-img*
+            "</a><span id=down_" i!id "></span></center>")
+      (and me-now (cansee i) (live i)
+           (no ((votes me-now) i!id))
+           (isnt i!by me-now)
+           (or (no downtoo)
+               (and (no (admin me-now))
+                    (>= (item-age i) downvote-time*))))
+        (let cook (user->cookie* me-now)
+          (pr "<center><a id=up_" i!id " onclick=\"return vote(this)\""
+              " href=\"vote?for=" i!id "&dir=up&by=" me-now
+              "&auth=" cook "&whence=" (urlencode whence) "\">"
+              up-arrow-img*
+              "</a><span id=down_" i!id "></span></center>"))
+        (center
+          (if (and (cansee i)
+                   (~and me-now ((votes) i!id)))
+               (do (votelink i whence 'up)
+                   (if (and downtoo
+                            (or (admin)
+                                (< (item-age i) downvote-time*))
+                            (canvote i 'down))
+                       (do (br)
+                           (votelink i whence 'down))
+                       ; don't understand why needed, but is, or a new
+                       ; page is generated on voting
+                       (tag (span id (+ "down_" i!id)))))
+              (author i)
+               (do (fontcolor orange (pr "*"))
+                   (br)
+                   (hspace votewid*))
+              (hspace votewid*))))))
 
 ; could memoize votelink more, esp for non-logged in users,
 ; since only uparrow is shown; could straight memoize
@@ -1796,10 +1828,45 @@ function vote(node) {
 
 (def news-type (i) (and i (in i!type 'story 'comment 'poll 'pollopt)))
 
+(= item-comments-cache* (table)
+   item-comments-cache-stamp* (table)
+   item-comments-cache-key* (table)
+   item-comments-cacheable* t
+   item-comments-cache-ttl* 60)
+
+(def comments-cache-key (i)
+  (cons (len i!kids) (or i!score 0)))
+
+(def cacheable-subcomments-viewer ()
+  (and item-comments-cacheable*
+       (no arg!nocache)
+       (no (me)) (no (admin)) (no (editor))))
+
+(def render-subcomments (i here)
+  (if (cacheable-subcomments-viewer)
+      (let key (comments-cache-key i)
+        (if (and (iso (item-comments-cache-key* i!id) key)
+                 (aand (item-comments-cache-stamp* i!id)
+                       (< (- (msec) it)
+                          (* item-comments-cache-ttl* 1000))))
+            (pr (item-comments-cache* i!id))
+            (let html (tostring (tab (display-subcomments i here)))
+              (= (item-comments-cache* i!id) html
+                 (item-comments-cache-stamp* i!id) (msec)
+                 (item-comments-cache-key* i!id) key)
+              (pr html))))
+      (tab (display-subcomments i here))))
+
 (def item-page (i)
   (with (title (and (cansee i)
                     (or i!title (aand i!text (ellipsize (striptags it)))))
-         here (item-url i!id))
+         here (item-url i!id)
+         t-sub 0
+         n-printed-0 comments-printed*
+         hits-0 cc-hits* misses-0 cc-misses*
+         t-gen-0 t-gen-msec* t-cache-0 t-cache-msec*
+         t-sort-0 t-sort-msec*
+         page-cache-hit nil)
     (longpage (msec) nil nil title here
       (tab (display-item nil i here)
            (display-item-text i)
@@ -1812,8 +1879,26 @@ function vote(node) {
              (row "" (comment-form i here))))
       (br2)
       (when (and i!kids (commentable i))
-        (tab (display-subcomments i here))
-        (br2)))))
+        (let t0 (msec)
+          (= page-cache-hit
+             (and (cacheable-subcomments-viewer)
+                  (iso (item-comments-cache-key* i!id)
+                       (comments-cache-key i))))
+          (render-subcomments i here)
+          (= t-sub (- (msec) t0)))
+        (br2))
+      (when (or (admin) arg!perf)
+        (br2)
+        (w/bars
+          (pr "subcomments: " t-sub " msec")
+          (pr "page-cache: " (if page-cache-hit "hit" "miss"))
+          (pr "gen: " (- t-gen-msec* t-gen-0) " msec")
+          (pr "cache: " (- t-cache-msec* t-cache-0) " msec")
+          (pr "sort: " (- t-sort-msec* t-sort-0) " msec")
+          (pr "comments: " (- comments-printed* n-printed-0))
+          (pr "cc hits: " (- cc-hits* hits-0))
+          (pr "cc misses: " (- cc-misses* misses-0))
+          (pr "cc size: " (len comment-cache*)))))))
 
 (def commentable (i) (in i!type 'story 'comment 'poll))
 
@@ -2018,11 +2103,32 @@ function vote(node) {
     (display-subcomments c whence (+ indent 1))))
 
 (def display-1comment (c whence indent showpar)
-  (row (tab (display-comment nil c whence t indent showpar showpar))))
+  ; Hand-inlined equivalent of:
+  ;   (row (tab (display-comment nil c whence t indent showpar showpar)))
+  ; Collapses the per-comment HTML scaffold into 4 pr calls instead of
+  ; ~12 macro-emitted ones; saves ~10-15 ms on a 1k-comment page.
+  (pr "<tr><td><table border=0><tr><td><img src=\""
+      (blank-url) "\" height=1 width=" (* indent 40)
+      "></td><td valign=top>")
+  (votelinks c whence t)
+  (pr "</td>")
+  (display-comment-body c whence t indent showpar showpar)
+  (pr "</tr></table></td></tr>"))
+
+(= t-sort-msec* 0)
+
+(def sort-kids-by-rank (kids)
+  (with (n (len kids) ranks (table))
+    (each k kids
+      (= (ranks k) (frontpage-rank (item k))))
+    (sort (fn (a b) (> (ranks a) (ranks b))) kids)))
 
 (def display-subcomments (c whence (o indent 0))
-  (each k (sort (compare > frontpage-rank:item) c!kids)
-    (display-comment-tree (item k) whence indent)))
+  (let t0 (msec)
+    (let sorted (if (cdr c!kids) (sort-kids-by-rank c!kids) c!kids)
+      (= t-sort-msec* (+ t-sort-msec* (- (msec) t0)))
+      (each k sorted
+        (display-comment-tree (item k) whence indent)))))
 
 (def display-comment (n c whence (o astree) (o indent 0)
                                  (o showpar) (o showon))
@@ -2037,9 +2143,10 @@ function vote(node) {
 ; It might solve the same problem more generally to make html code
 ; more efficient.
 
-(= comment-cache* (table) comment-cache-timeout* (table) cc-window* 10000)
+(= comment-cache* (table) comment-cache-timeout* (table) cc-window* 100000000)
 
-(= comments-printed* 0 cc-hits* 0)
+(= comments-printed* 0 cc-hits* 0 cc-misses* 0
+   t-gen-msec* 0 t-cache-msec* 0)
 
 (= comment-caching* t) 
 
@@ -2064,10 +2171,11 @@ function vote(node) {
            (awhen (comment-cache* c!id)
              (++ cc-hits*)
              it))
-      (= (comment-cache-timeout* c!id)
-          (cc-timeout c!time)
-         (comment-cache* c!id)
-          (tostring (gen-comment-body c whence t indent nil nil)))))
+      (do (++ cc-misses*)
+          (= (comment-cache-timeout* c!id)
+              (cc-timeout c!time)
+             (comment-cache* c!id)
+              (tostring (gen-comment-body c whence t indent nil nil))))))
 
 ; Cache for the remainder of the current minute, hour, or day.
 

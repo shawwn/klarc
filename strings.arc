@@ -71,9 +71,9 @@
               (++ i 2))
           (writec c)))))
 
-(def urlencode (s)
-  (tostring 
-    (each c s 
+(defmemo urlencode (s)
+  (tostring
+    (each c s
       (writec #\%)
       (let i (int c)
         (if (< i 16) (writec #\0))
