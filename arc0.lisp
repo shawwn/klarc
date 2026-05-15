@@ -769,6 +769,42 @@
 
 (xdef newstring #'make-string)
 
+; Native O(n) string slice. `cut` is implemented in arc.arc via
+; newstring + per-char copy which is O(n) but with arc-level overhead
+; per character; for 1MB inputs that's ~half a second. subseq runs at
+; CL speed.
+(xdef substr (s start end) (subseq s start end))
+
+; Native: split a string on a single marker character, returning a
+; list of alternating string-chunks and integers (the digits between
+; pairs of marker characters parsed as ints). Used by news.arc's
+; comments-tree cache to break a `tostring`-rendered page with vote-
+; link markers into emit-time chunks. Pure arc implementation costs
+; ~200ms per 1MB string; this is a few ms.
+(xdef split-on-marker-native (s marker-char)
+  (let ((markerc (if (characterp marker-char)
+                     marker-char
+                     (code-char marker-char)))
+        (result nil)
+        (start 0)
+        (len (length s))
+        (i 0))
+    (loop while (< i len) do
+      (cond
+        ((char= (aref s i) markerc)
+         (push (subseq s start i) result)
+         (let ((j (1+ i)))
+           (loop while (and (< j len)
+                            (not (char= (aref s j) markerc)))
+                 do (incf j))
+           (push (parse-integer s :start (1+ i) :end j) result)
+           (setf start (1+ j))
+           (setf i start)))
+        (t (incf i))))
+    (when (< start len)
+      (push (subseq s start len) result))
+    (nreverse result)))
+
 (xdef trunc (x) (truncate x))
 
 (xdef exact (x) (tnil (and (integerp x) (= x (truncate x)))))
